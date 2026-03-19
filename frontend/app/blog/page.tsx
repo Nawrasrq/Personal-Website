@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { PostCard } from '@/components/blog/PostCard'
+import { BlogClient } from '@/components/blog/BlogClient'
 import { getAllPosts } from '@/lib/mdx'
 
 export const metadata: Metadata = {
@@ -10,8 +10,12 @@ export const metadata: Metadata = {
 export default function BlogPage() {
   const posts = getAllPosts()
 
+  const tags = Array.from(
+    new Set(posts.flatMap((p) => p.frontmatter.tags ?? []))
+  ).sort()
+
   return (
-    <div className="mx-auto max-w-3xl px-6 py-16 space-y-8">
+    <div className="mx-auto max-w-6xl px-6 py-16 space-y-8">
       <div className="space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">Blog</h1>
         <p className="text-muted-foreground">
@@ -24,11 +28,7 @@ export default function BlogPage() {
           No posts yet — check back soon.
         </p>
       ) : (
-        <div className="grid gap-4">
-          {posts.map((post) => (
-            <PostCard key={post.slug} post={post} />
-          ))}
-        </div>
+        <BlogClient posts={posts} tags={tags} />
       )}
     </div>
   )

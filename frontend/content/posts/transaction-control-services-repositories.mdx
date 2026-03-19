@@ -1,0 +1,151 @@
+---
+title: "Transaction Control: Why Only Services Should Commit"
+date: "2026-03-17"
+description: "SQLAlchemy makes it easy to commit from anywhere — which is exactly why you shouldn't. Here's why services own the transaction boundary and repositories only flush."
+tags: ["flask", "sqlalchemy", "python", "backend", "database"]
+published: true
+---
+
+SQLAlchemy makes `db.session.commit()` available everywhere. You can call it in a model method, a repository, a utility function, a route handler. There's nothing stopping you.
+
+That flexibility is also the trap. When commits happen in multiple places, a single request can partially succeed — some records written, others not — and you have no clean way to roll it back. The fix is a simple rule: **services commit, repositories flush, and nothing else commits at all.**
+
+## flush() vs commit() — What's the Difference
+
+Both methods interact with the database session, but they do very different things.
+
+`flush()` sends pending SQL statements to the database within the current transaction. The changes are staged — the database has seen them and assigned IDs, but nothing is permanent. If the session rolls back, the flush is undone.
+
+`commit()` makes everything in the current transaction permanent and releases the transaction. After a commit, there's no rollback.
+
+```python
+post = Post(title="My Post", user_id=1)
+db.session.add(post)
+
+# After flush: post.id is assigned, but not permanent
+db.session.flush()
+print(post.id)  # → 42 (assigned by the database)
+
+# After commit: permanent, visible to other connections
+db.session.commit()
+```
+
+Repositories use `flush()` because they need to stage changes and get assigned IDs, but they shouldn't decide when to make those changes permanent. That decision belongs to the service.
+
+## Why Repositories Should Never Commit
+
+Imagine a service that creates a user and immediately creates their default settings:
+
+```python
+def create_user(self, data: UserCreate) -> User:
+    user = self.user_repo.create(email=data.email, name=data.name)
+    # user_repo.create() calls commit() internally...
+
+    settings = self.settings_repo.create(user_id=user.id, theme="dark")
+    # What if this raises an exception?
+    # The user is already committed. Settings were never created.
+    # The database now has a user with no settings.
+```
+
+If `user_repo.create()` commits internally and then `settings_repo.create()` raises an exception, the user record is permanently written with no corresponding settings. The request failed, but the database was partially updated.
+
+This is the core problem: when repositories commit, they hand off transaction control prematurely. The service can no longer treat the entire operation as a single atomic unit.
+
+## The Service as Transaction Coordinator
+
+The correct pattern puts the service in charge:
+
+```python
+class UserService:
+    def __init__(self):
+        self.user_repo = UserRepository()
+        self.settings_repo = SettingsRepository()
+
+    def create_user(self, data: UserCreate) -> User:
+        try:
+            # Both operations happen in the same transaction
+            user = self.user_repo.create(email=data.email, name=data.name)
+            # flush() assigns user.id without committing
+
+            settings = self.settings_repo.create(
+                user_id=user.id,
+                theme="dark"
+            )
+
+            # One commit covers both operations
+            self.user_repo.commit()
+            return user
+
+        except Exception:
+            self.user_repo.rollback()
+            raise
+```
+
+And the repository:
+
+```python
+class UserRepository(BaseRepository[User]):
+    def create(self, **kwargs) -> User:
+        user = User(**kwargs)
+        self.session.add(user)
+        self.flush()   # ← stages the change, assigns ID
+        return user    # ← never calls commit()
+```
+
+Now both records are written atomically. If settings creation fails, the entire transaction rolls back — no orphaned user record, no partial state.
+
+## A Concrete Example: Order Creation
+
+Here's a more realistic scenario — creating an order with multiple line items:
+
+```python
+class OrderService:
+    def create_order(self, user_id: int, items: list[OrderItemCreate]) -> Order:
+        try:
+            # Create the order header
+            order = self.order_repo.create(
+                user_id=user_id,
+                status=OrderStatus.PENDING
+            )
+            # order.id is now available (flush happened inside create())
+
+            # Create all line items in the same transaction
+            total = 0
+            for item_data in items:
+                product = self.product_repo.get_by_public_id(item_data.product_id)
+                if not product:
+                    raise NotFoundError(f"Product {item_data.product_id} not found")
+
+                line_item = self.line_item_repo.create(
+                    order_id=order.id,
+                    product_id=product.id,
+                    quantity=item_data.quantity,
+                    unit_price=product.price
+                )
+                total += product.price * item_data.quantity
+
+            # Update order total
+            self.order_repo.update(order.id, total=total)
+
+            # Single commit — all of this or none of it
+            self.order_repo.commit()
+            return order
+
+        except Exception:
+            self.order_repo.rollback()
+            raise
+```
+
+If any product doesn't exist, or any line item creation fails, the entire order is rolled back. The database never ends up with a partial order. This is only possible because no repository committed early.
+
+## What Happens When You Break the Rule
+
+The failure mode is subtle. Repositories that commit internally appear to work fine under normal conditions — each request creates complete records. The problem surfaces under:
+
+- **Exceptions mid-operation:** First record committed, second operation fails, no rollback possible
+- **Validation failures discovered late:** Business rule violation after some records already written
+- **Nested service calls:** Service A calls Service B, both think they own the transaction, one commits too early
+
+By the time you hit one of these in production, the data is already inconsistent. There's no clean way to fix it without a migration or manual cleanup.
+
+The rule is simple enough to follow consistently: repositories `flush()`, services `commit()`, nothing else touches the transaction. When every layer respects that boundary, you can reason about atomicity at the service level — which is exactly where the business logic lives.

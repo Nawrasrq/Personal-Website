@@ -15,9 +15,7 @@ export default async function ProjectsPage() {
       <div className="space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
         <p className="text-muted-foreground">
-          A selection of my personal projects. Add the{' '}
-          <code className="text-xs bg-muted px-1.5 py-0.5 rounded">portfolio</code>{' '}
-          topic to a GitHub repo to show it here.
+          A selection of my personal projects.
         </p>
       </div>
 

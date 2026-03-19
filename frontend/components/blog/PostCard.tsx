@@ -4,18 +4,22 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import type { Post } from '@/lib/types'
 
 export function PostCard({ post }: { post: Post }) {
-  const { slug, frontmatter } = post
+  const { slug, frontmatter, readingTime } = post
 
   return (
     <Link href={`/blog/${slug}`} className="group block">
       <Card className="h-full transition-colors hover:border-primary/50">
         <CardHeader className="pb-3">
-          <p className="text-xs text-muted-foreground">
-            {new Date(frontmatter.date).toLocaleDateString('en-US', {
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric',
-            })}
+          <p className="text-xs text-muted-foreground flex items-center gap-2">
+            <span>
+              {new Date(frontmatter.date).toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+              })}
+            </span>
+            <span aria-hidden>·</span>
+            <span>{readingTime} min read</span>
           </p>
           <h2 className="text-lg font-semibold group-hover:text-primary transition-colors leading-snug">
             {frontmatter.title}

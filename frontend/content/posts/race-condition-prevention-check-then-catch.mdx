@@ -1,0 +1,93 @@
+---
+title: "Race Conditions in APIs: Why 'Check If Exists' Isn't Enough"
+date: "2026-03-15"
+description: "The naive duplicate check breaks under concurrent load. The check-then-catch pattern uses both application logic and database constraints as a safety net."
+tags: ["backend", "database", "python", "concurrency"]
+published: true
+---
+
+The standard way to prevent duplicate records looks like this:
+
+```python
+def create_user(self, email: str) -> User:
+    if self.repo.find_by_email(email):
+        raise ConflictError("Email already in use")
+
+    user = self.repo.create(email=email)
+    self.repo.commit()
+    return user
+```
+
+Check if it exists. If it does, raise an error. If it doesn't, create it. Clean, readable, and broken under concurrent load.
+
+## Why the Check Alone Fails
+
+Consider two requests hitting your API at the same moment, both trying to register the same email address:
+
+```
+Request A: find_by_email("x@example.com") → None  (not found)
+Request B: find_by_email("x@example.com") → None  (not found, A hasn't committed yet)
+
+Request A: INSERT INTO users (email) VALUES ("x@example.com")
+Request B: INSERT INTO users (email) VALUES ("x@example.com")
+
+Request A: commit() → success, id=42
+Request B: commit() → IntegrityError (unique constraint violation)
+```
+
+Both requests passed the check. Both attempted the insert. One succeeded, one raised an unhandled `IntegrityError` that bubbles up as a 500 — or worse, crashes the worker with no useful error message.
+
+The check happens at the application level. The database doesn't know about it. Between the moment Request A reads "not found" and the moment it commits, another request can read the same "not found" and race to insert.
+
+## The Check-Then-Catch Pattern
+
+The fix is to keep the application-level check *and* catch the database constraint error:
+
+```python
+from sqlalchemy.exc import IntegrityError
+from app.core.exceptions import ConflictError
+
+def create_user(self, email: str) -> User:
+    # Application-level check (handles the common case fast)
+    if self.repo.find_by_email(email):
+        raise ConflictError("Email already in use")
+
+    try:
+        user = self.repo.create(email=email)
+        self.repo.commit()
+        return user
+    except IntegrityError:
+        self.repo.rollback()
+        raise ConflictError("Email already in use")
+```
+
+Both lines of defense serve a purpose:
+
+**The application check** catches the obvious case — a user submitting a form twice, a client retrying a request. It gives a clean error message immediately without hitting the database for an insert that will fail.
+
+**The IntegrityError catch** handles the race condition. If two requests slip through the check simultaneously, only one insert will succeed. The other gets a database-level constraint error, which we catch and convert into the same clean `ConflictError` instead of an unhandled 500.
+
+## Prerequisites: The Database Constraint
+
+This only works if the database actually has a unique constraint on the column. Without it, both inserts succeed and you have duplicates regardless of what the application code does.
+
+```python
+class User(db.Model):
+    email: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,   # ← this is what raises IntegrityError on collision
+        nullable=False
+    )
+```
+
+The constraint is what makes the catch reliable. The application check is an optimization on top of it.
+
+## The Takeaway
+
+Use both layers, not just one:
+
+- Application check → fast path for the common case, clean error message
+- Database unique constraint → the ground truth, always enforced
+- IntegrityError catch → converts database errors into API errors without 500s
+
+Neither layer alone is sufficient. The check without the constraint is optimistic and wrong. The constraint without the catch gives clients an unhandled error. Together, they handle concurrent requests correctly every time.

@@ -1,0 +1,91 @@
+---
+title: "The Dual-ID Pattern: Stop Exposing Integer Primary Keys in Your API"
+date: "2026-03-16"
+description: "Returning database IDs like 1, 2, 3 in your API is a quiet security mistake. Here's a two-field fix that keeps your internals private."
+tags: ["api", "security", "database", "backend"]
+published: true
+---
+
+Most APIs start with a simple convention: the database assigns an integer ID to each record, and the API returns it. A newly created user gets `id: 1`, the next gets `id: 2`, and so on.
+
+This is convenient. It's also leaking information you probably don't want to share.
+
+## The Enumeration Attack
+
+When your API exposes sequential integer IDs, anyone can enumerate your data. If `GET /api/users/1` returns a user, a script can loop from 1 to 10,000 and scrape every user record your API returns — even without any authentication bypass.
+
+Beyond scraping, sequential IDs reveal business metrics. An e-commerce competitor can track your order volume by placing two orders a week apart and comparing IDs. A new user can tell exactly how many users signed up before them.
+
+Integer IDs are optimized for the database, not for API clients. Fast joins, compact indexes, auto-increment — those are internal concerns. There's no reason the client needs to know the shape of your primary key.
+
+## The Fix: Two IDs, One Model
+
+The dual-ID pattern gives every model two identifiers:
+
+- `id` — integer primary key, used internally for joins and foreign keys
+- `public_id` — UUID, used in all external API surfaces
+
+```python
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import String
+import uuid
+
+class PublicIdMixin:
+    public_id: Mapped[str] = mapped_column(
+        String(36),
+        unique=True,
+        index=True,
+        default=lambda: str(uuid.uuid4())
+    )
+```
+
+Add this mixin to any model that gets exposed via API:
+
+```python
+class User(db.Model, TimestampMixin, PublicIdMixin):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+```
+
+## Internal vs External Query Patterns
+
+The split carries through to how you query records:
+
+```python
+# Internal: use integer id for performance-critical operations
+# (joins, foreign key lookups, bulk operations)
+user = session.get(User, user_id)
+
+# External: use public_id for anything coming from the API
+user = session.execute(
+    select(User).where(User.public_id == public_id)
+).scalar_one_or_none()
+```
+
+Foreign keys between tables still use integer IDs — that's the whole point. The database's relational performance stays intact. The UUID only surfaces at the API boundary.
+
+Your response schema never includes `id`:
+
+```python
+class UserResponse(BaseModel):
+    public_id: str      # ← exposed
+    email: str
+    name: str
+    created_at: datetime
+
+    # id is intentionally absent
+```
+
+## What You Get
+
+An API that returns `public_id: "a1b2c3d4-e5f6-..."` instead of `id: 42`:
+
+- Reveals nothing about record count or sequence
+- Can't be enumerated without a valid UUID to start from
+- Allows the internal schema to change (e.g. switching to a different PK strategy) without breaking API clients
+- Makes it obvious at a glance which identifier is safe to share externally
+
+The mixin is two fields and five lines of code. It's one of the lowest-effort security improvements you can add to a backend from the start — much harder to retrofit after an API is already in use.

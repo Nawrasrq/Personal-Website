@@ -1,0 +1,171 @@
+---
+title: "The MSCR Pattern: How I Structure Every Flask Backend"
+date: "2026-03-18"
+description: "Fat controllers are a trap. Here's the four-layer architecture I use to keep Flask backends testable, maintainable, and sane."
+tags: ["architecture", "flask", "python", "backend"]
+published: true
+---
+
+Every Flask tutorial starts the same way: a route function that does everything. It validates the request, queries the database, applies business rules, and returns a response — all in one place. It's quick to write, easy to understand at first, and becomes a nightmare to maintain.
+
+The MSCR pattern — **Models, Services, Controllers, Repositories** — is how I structure every Flask backend to avoid that trap. Each layer has one job, and nothing else.
+
+## The Problem with Fat Controllers
+
+Here's what a "just works" route looks like:
+
+```python
+@app.route("/users/<int:user_id>/posts", methods=["POST"])
+def create_post(user_id):
+    data = request.json
+    user = db.session.get(User, user_id)
+    if not user:
+        return {"error": "User not found"}, 404
+
+    if Post.query.filter_by(title=data["title"], user_id=user_id).first():
+        return {"error": "Post already exists"}, 409
+
+    post = Post(
+        title=data["title"],
+        body=data["body"],
+        user_id=user_id
+    )
+    db.session.add(post)
+    db.session.commit()
+    return {"id": post.id, "title": post.title}, 201
+```
+
+This function is doing four things at once: parsing HTTP input, enforcing a business rule (no duplicate titles), persisting data, and formatting a response. Writing a unit test for the "no duplicate titles" rule means you're also testing Flask routing and SQLAlchemy sessions. Changing the database query means touching the same file as your HTTP logic.
+
+The MSCR pattern separates all of this.
+
+## The Four Layers
+
+```
+Controllers (HTTP) → Services (Business Logic) → Repositories (Data Access) → Models (ORM)
+```
+
+Each layer only talks to the one below it. Nothing skips a layer.
+
+### Models
+
+The bottom of the stack. Pure SQLAlchemy ORM classes — no business logic, no HTTP awareness. Just columns, relationships, and mixins.
+
+```python
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import String, Text, ForeignKey
+from app.db import db
+from app.models.base import TimestampMixin, PublicIdMixin
+
+class Post(db.Model, TimestampMixin, PublicIdMixin):
+    __tablename__ = "posts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+```
+
+The model knows nothing about how it's queried or what rules govern its creation. That's not its job.
+
+### Repositories
+
+The data access layer. Repositories own all SQL — they're the only place `db.session` is used directly. A generic `BaseRepository` handles common CRUD, and specific repositories add custom queries.
+
+```python
+from app.repositories.base import BaseRepository
+from app.models.post import Post
+
+class PostRepository(BaseRepository[Post]):
+    def __init__(self):
+        super().__init__(Post)
+
+    def find_by_title_and_user(self, title: str, user_id: int) -> Post | None:
+        return self.session.execute(
+            select(Post).where(
+                Post.title == title,
+                Post.user_id == user_id,
+                Post.is_deleted.is_(False)
+            )
+        ).scalar_one_or_none()
+```
+
+One critical rule: **repositories never call `commit()`**. They only `flush()` — which stages changes and assigns IDs without writing to the database permanently. The service layer decides when to commit.
+
+### Services
+
+The business logic layer. Services orchestrate repositories, enforce rules, and own transaction boundaries. They know nothing about HTTP — no `request`, no response codes.
+
+```python
+from app.repositories.post_repository import PostRepository
+from app.schemas.post_schemas import PostCreate
+from app.core.exceptions import NotFoundError, ConflictError
+from sqlalchemy.exc import IntegrityError
+
+class PostService:
+    def __init__(self, repo: PostRepository | None = None):
+        self.repo = repo or PostRepository()
+
+    def create_post(self, user_id: int, data: PostCreate) -> Post:
+        if self.repo.find_by_title_and_user(data.title, user_id):
+            raise ConflictError("A post with this title already exists")
+
+        try:
+            post = self.repo.create(
+                title=data.title,
+                body=data.body,
+                user_id=user_id
+            )
+            self.repo.commit()
+            return post
+        except IntegrityError:
+            self.repo.rollback()
+            raise ConflictError("A post with this title already exists")
+```
+
+Notice the service both checks for duplicates *and* catches `IntegrityError`. That's intentional — more on that in a future post about race conditions.
+
+### Controllers
+
+The HTTP layer. Controllers are Flask blueprints — they parse requests, call services, and format responses. No business logic, no direct database access.
+
+```python
+from flask import Blueprint, request
+from app.core.responses import success_response, error_response
+from app.services.post_service import PostService
+from app.schemas.post_schemas import PostCreate, PostResponse
+
+posts_bp = Blueprint("posts", __name__, url_prefix="/api/v1/posts")
+service = PostService()
+
+@posts_bp.route("/users/<string:user_public_id>/posts", methods=["POST"])
+def create_post(user_public_id: str):
+    body = request.get_json(silent=True) or {}
+    data = PostCreate(**body)
+    post = service.create_post(user_public_id=user_public_id, data=data)
+    return success_response(PostResponse.model_validate(post).model_dump(), status=201)
+```
+
+The controller doesn't know how the duplicate check works or how the database is queried. It just calls the service and formats the result.
+
+## How the Layers Work Together
+
+When a `POST /api/v1/posts/users/abc-123/posts` request comes in:
+
+1. **Controller** parses the JSON body, validates it with Pydantic, calls the service
+2. **Service** checks for duplicates, creates the record via the repository, commits
+3. **Repository** runs the SQL, flushes to get the assigned ID
+4. **Model** defines the schema — columns, types, relationships
+5. Response bubbles back up: repository returns the model, service returns it, controller serializes it
+
+## Why This Is Worth the Extra Files
+
+The real payoff shows up when the codebase grows.
+
+**Testability.** You can test the service layer with a mocked repository — no database needed. You can test the repository with a real database but no HTTP setup. You can test the controller with a mocked service and no business logic. Each layer tests independently.
+
+**Replaceability.** Want to switch from SQLite to PostgreSQL? Only the repository layer cares. Want to change the duplicate-title rule? Only the service changes. Want to add a GraphQL endpoint alongside REST? Write a new controller that calls the same services.
+
+**Readability.** When something breaks, you know exactly which layer to look in. A 409 Conflict error? Service layer. A SQL performance issue? Repository layer. A 422 Unprocessable Entity? Controller or schema.
+
+The initial cost of splitting code across four files pays off quickly. The alternative — one fat controller that does everything — only feels simpler until the third time you're debugging a business rule buried inside a route function.
