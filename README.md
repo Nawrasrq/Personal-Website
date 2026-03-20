@@ -46,7 +46,7 @@ Live at:
 ### Features
 - **Home** — hero section with links to projects and blog
 - **About** — bio (MDX), skills grouped by category, work/education timeline, resume download
-- **Blog** — MDX posts with syntax highlighting via `rehype-pretty-code`
+- **Blog** — MDX posts with syntax highlighting, tag filter pills, responsive 3-column grid, and read time estimates
 - **Projects** — GitHub repos tagged with the `portfolio` topic, fetched live via GitHub API (ISR, revalidates hourly)
 - Dark/light theme toggle, defaulting to dark
 

@@ -93,12 +93,13 @@ components/
 │   ├── Footer.tsx          # GitHub + LinkedIn icon links
 │   └── ThemeToggle.tsx     # 'use client' — useTheme() with mounted guard
 ├── home/
-│   └── HeroSection.tsx     # Hero with CTA buttons and social links
+│   └── HeroSection.tsx     # Hero with short tagline, CTA buttons, secondary paragraph, social links
 ├── about/
 │   ├── SkillBadges.tsx     # Skill badges grouped by category
 │   └── Timeline.tsx        # Work/education timeline with bullet points
 ├── blog/
-│   ├── PostCard.tsx        # Blog post card (title, date, description, tags)
+│   ├── BlogClient.tsx      # 'use client' — tag filter pills + responsive grid
+│   ├── PostCard.tsx        # Blog post card (title, date, read time, description, tags)
 │   └── PostHeader.tsx      # Blog post header
 ├── projects/
 │   └── ProjectCard.tsx     # GitHub repo card (language, stars, links)
@@ -159,6 +160,10 @@ published: true
 ```
 
 Only posts with `published: true` are shown. Sorted by date descending.
+
+The blog index page (`app/blog/page.tsx`) is a server component that passes all posts and a deduplicated sorted tag list to `BlogClient`. `BlogClient` is `'use client'` and handles tag filtering state — clicking a pill filters posts client-side with no page reload. The grid is responsive: 1 col mobile → 2 col (`sm:`) → 3 col (`lg:`).
+
+`Post` includes a `readingTime` field (minutes, rounded, minimum 1) computed from word count in `getAllPosts()` — ~200 words per minute.
 
 ### About Page
 
