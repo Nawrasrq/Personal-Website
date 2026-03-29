@@ -29,7 +29,7 @@ export function HeroSection() {
         </div>
         <p className="max-w-xl text-sm text-muted-foreground leading-relaxed">
           My work spans database architecture, ETL pipeline design, REST APIs, E-Commerce
-          integrations, and workflow automation — primarily in Python and SQL. I&apos;m most
+          integrations, and workflow automation primarily in Python and SQL. I&apos;m most
           at home designing the infrastructure that sits between raw data and the people who rely on it.
         </p>
         <div className="flex items-center gap-4 pt-2">
