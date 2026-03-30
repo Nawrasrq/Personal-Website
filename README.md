@@ -2,7 +2,7 @@
 
 My personal portfolio website — built with a Next.js frontend and a Flask backend.
 
-Live at: https://personal-website-nawrasrqs-projects.vercel.app
+Live at: https://personal-website-hazel-nine-39.vercel.app/
 
 ---
 
