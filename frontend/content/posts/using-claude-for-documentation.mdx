@@ -1,0 +1,134 @@
+---
+title: "Using Claude to Write and Maintain Technical Documentation"
+date: "2026-04-07"
+description: "How to use Claude as a documentation assistant — what to provide, what to expect, and how to keep docs accurate over time."
+tags: ["documentation", "ai", "claude", "engineering", "productivity"]
+published: true
+---
+
+Writing technical documentation is one of those tasks that's easy to understand and easy to defer. The system works, the team knows how it works, and writing it all down feels like overhead. Then someone new joins, or something breaks, or a system needs to be changed — and the absence of documentation becomes very expensive very quickly.
+
+Claude can help close this gap. Not as a replacement for engineering judgment, but as a capable first-draft writer that produces structurally complete documentation quickly — given the right inputs. This post covers how to set that up effectively.
+
+## The Right Mental Model
+
+The most useful way to think about Claude as a documentation assistant is as a writer who is fast, thorough, and takes instructions well — but who only knows what you tell it. It can't inspect your running system, query your database, or read files it hasn't been given. It can only work with what's in the conversation.
+
+This means the quality of Claude's output is directly proportional to the quality of your inputs. A vague prompt with no source material produces a generic draft. A structured prompt with a template, writing standards, and actual source code produces something close to production-ready.
+
+## What to Provide
+
+For any documentation task, Claude needs three things:
+
+**1. The template for that doc type**
+
+Templates define structure. If you're documenting an ETL, provide the ETL template. Claude will fill it in, mark inapplicable sections as `N/A`, and flag anything unclear with `[NEEDS REVIEW]`. Without a template, Claude will invent its own structure — which may not match your team's standards or include the sections you care about.
+
+**2. Writing standards**
+
+These tell Claude *how* to write, not just *what* to write. A standards file might include rules like "explain why decisions were made, not just what they are" or "use code blocks for all commands." Without these, Claude defaults to its own style, which may be too verbose, too vague, or inconsistent with your existing docs.
+
+**3. Source material**
+
+This is the actual content Claude will use to fill in the template. Source material can be:
+- Source code (Python files, SQL scripts, config files)
+- An existing but incomplete or outdated doc
+- A README or inline comments
+- Notes you've written about the system
+- A combination of the above
+
+The more precise the source material, the fewer gaps Claude will need to flag. An existing doc with inaccuracies is still useful — Claude can identify what's changed and update it.
+
+## A Concrete Prompt Structure
+
+Here's a prompt pattern that works well:
+
+```
+Using the attached writing standards and ETL template, write documentation
+for the following process.
+
+Source code: [paste the relevant Python/SQL files]
+Existing doc (if any): [paste current Confluence page or notes]
+Additional context: [owner, current status, known issues, anything not in the code]
+
+If any section is unclear from the source material, mark it [NEEDS REVIEW].
+Mark inapplicable sections N/A.
+```
+
+This gives Claude a clear output format (the template), quality constraints (the standards), raw material to work from (the code), and explicit instructions for handling uncertainty.
+
+The `[NEEDS REVIEW]` instruction is important. Without it, Claude will often fill in plausible-sounding content for sections it doesn't have information for. That's worse than a gap — it's a gap that looks filled. Instructing Claude to flag uncertainty explicitly produces a draft that's honest about what's incomplete.
+
+## What Claude Does Well
+
+**Structural completeness.** Claude reliably fills out every section of a template, including ones authors commonly skip. If your template has a "Consumers & Use Cases" section, Claude will ask what it knows about that — and flag it if there's nothing in the source material.
+
+**Extracting information from code.** Given a Python ETL script, Claude can identify the entry point, parse the transformation logic, list the dependencies, extract environment variable names, and summarize what the process does — faster than most engineers would write it by hand.
+
+**Consistent formatting.** Claude applies table formatting, code blocks, and section headers consistently. If your standards say "use tables for environment variables," it will use tables for environment variables across every doc it produces.
+
+**Rewriting stale docs.** If you have an outdated doc and updated source code, Claude can diff the two conceptually — identifying what's changed and rewriting the affected sections. This is one of the most practical use cases: maintenance is usually harder than initial creation, and Claude handles it well.
+
+## What Claude Gets Wrong
+
+**It invents details when uncertain.** If a section requires information that isn't in the source material and you haven't instructed it to flag gaps, Claude will often produce something plausible-sounding. This is the most dangerous failure mode — a doc that reads as authoritative but contains invented specifics.
+
+The fix is explicit instruction: *"If something is unclear from the source material, mark it [NEEDS REVIEW] rather than guessing."* This turns a silent failure into a visible one.
+
+**It can't verify runtime behavior.** Claude can read a schedule configuration and say "this runs nightly at 2 AM" — but it can't verify whether that's actually what happens in your environment. Operational details like typical runtime, actual data volumes, and real-world failure modes need to come from someone who has run the system.
+
+**It doesn't know your organization.** Team contacts, Jira links, internal tool names, and Confluence page references all need to be provided. Claude will leave these as placeholders unless you give it the specifics.
+
+## Keeping Docs Accurate Over Time
+
+The hardest part of documentation isn't writing it — it's keeping it accurate as systems change. A few practices that help:
+
+**Last Verified Date.** Every doc should have a date indicating when it was last confirmed accurate. This makes staleness visible. A doc verified recently can be trusted. A doc with no date or a date from two years ago needs to be treated with skepticism. When you update a doc, always update this date.
+
+**Update on change, not after.** The best time to update documentation is when you're making the change — not after. At that point you understand exactly what's different. Deferring it means you'll be reconstructing context later, or not doing it at all.
+
+**Use Claude for maintenance, not just creation.** When a system changes, you can give Claude the old doc, the new or modified code, and a summary of what changed. It will identify which sections need updating and rewrite them. This is faster than manually editing a doc and reduces the chance of missing something.
+
+A prompt for a maintenance pass:
+
+```
+This is the current documentation for [process name]: [paste doc]
+
+The following changes were made to the system: [describe changes or paste updated code]
+
+Update the affected sections of the doc to reflect these changes.
+Mark anything you're uncertain about as [NEEDS REVIEW].
+Update the Last Verified Date to today.
+```
+
+**Treat [NEEDS REVIEW] flags as tasks.** When Claude flags something, it means the doc is incomplete. Treat those flags as open tasks — not as acceptable permanent states. A doc with unresolved `[NEEDS REVIEW]` markers isn't finished.
+
+## The Standards File as an Entry Point
+
+If you're maintaining a template system, it's worth keeping a standards file that serves as the entry point into the whole system. This file should list available templates, summarize the writing rules, define status codes (Active / Deprecated / In Development), and explain how to use the templates.
+
+When working with Claude, always provide this file alongside the relevant template. It means you don't have to re-explain your standards in every prompt — the file does it for you. As your standards evolve, you update the file once and every future doc inherits the change.
+
+This is also the file new team members should read first. A good standards file explains not just what the templates contain, but why they're structured the way they are. That context turns a set of templates into a documentation philosophy — something the team can reason about and improve together.
+
+## In Practice
+
+The workflow that works best is:
+
+1. New system or change → gather source material (code, existing docs, context notes)
+2. Choose the relevant template
+3. Prompt Claude with the template + standards file + source material
+4. Review the output — verify technical details, fill in organizational specifics, resolve `[NEEDS REVIEW]` flags
+5. Publish with today's Last Verified Date
+
+Claude handles the structural work. The engineer handles the verification. Neither does the other's job.
+
+The result isn't perfect documentation from day one — it's documentation that's structurally complete, consistently formatted, and honest about its gaps. That's a much better starting point than a blank page or an undocumented system.
+
+## Tooling Worth Knowing
+
+If you're on the Atlassian stack, **Atlassian Rovo** is worth looking at. It's Atlassian's native AI product that integrates directly with Confluence, Jira, and Bitbucket. It can read across your connected sources — repos, tickets, existing pages — to answer questions and help draft or update content without you having to manually paste source material into a chat. For teams already deep in that ecosystem it removes a lot of the copy-paste overhead described in this post.
+
+For teams not on Atlassian, **Notion AI** offers similar in-place generation and rewriting if Notion is your documentation platform.
+
+On the automation side, **CI hooks** are an underused option. A simple GitHub Actions workflow can post a reminder to Slack or open a ticket whenever a file that has corresponding documentation is modified — for example, if `etl_orders.py` changes, flag the related Confluence page for review. This doesn't update the doc automatically, but it closes the gap between "the system changed" and "someone remembered to update the docs." Pairing that trigger with a Claude-assisted rewrite keeps the maintenance loop tight without requiring anyone to remember to do it manually.

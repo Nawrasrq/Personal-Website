@@ -1,0 +1,163 @@
+---
+title: "Why Documentation Templates Are Worth Building"
+date: "2026-04-07"
+description: "Ad-hoc documentation fails teams silently. Here's the structure I use to fix it — template design, writing standards, and what to include."
+tags: ["documentation", "engineering", "best-practices", "productivity"]
+published: true
+---
+
+Documentation has a reliability problem. Not because engineers don't know how to write — but because there's no agreed standard for what a doc should contain, how it should be structured, or when it's considered complete. The result is a wiki full of pages where some have setup instructions and some don't, some have owners and some don't, and some were last updated three years ago with no indication of whether they're still accurate.
+
+A documentation template system fixes this. The idea is simple: define the structure of each doc type once, write standards that apply across all of them, and give every author a starting point that enforces completeness by default.
+
+## Why Inconsistency Is the Real Problem
+
+When documentation is inconsistent, the reader can't tell the difference between "this section doesn't exist" and "this section was never considered." If one ETL doc has a failure modes section and another doesn't, does the second ETL have no failure modes — or did the author just not think to include them?
+
+This ambiguity is expensive. A new engineer setting up a process has to guess or ask. A senior engineer debugging a production issue has to read the code instead of the doc. The documentation exists, but it can't be trusted to be complete.
+
+Templates solve this by making structure mandatory. When every ETL doc has a "Known Failure Modes" section, an empty one means there are none. The reader can distinguish between "we considered this and there's nothing here" and "we didn't think about it." That's a meaningful difference.
+
+## What Doc Types to Template
+
+Start by identifying which doc types your team produces most — and which ones are most inconsistent. Common categories worth templating:
+
+- **Database tables** — schema, constraints, relationships, data flow in and out
+- **ETL and automated processes** — inputs, transformation logic, outputs, scheduling, failure modes
+- **Internal tools and manual processes** — purpose, prerequisites, step-by-step usage
+- **REST APIs** — endpoints, request/response contracts, authentication, architecture decisions
+
+These four cover most of the technical surface area in a typical backend-heavy team. You don't need to template everything at once — one good template used consistently is worth more than a complete system nobody follows.
+
+## What to Put in Each Template
+
+The goal of a template is to answer every question a reader might reasonably ask about that doc type. This means thinking about the reader first, not the author.
+
+### For database tables
+
+A table doc should tell the reader what data is stored, how the schema is structured, what constraints and relationships exist, and how data flows in and out.
+
+The "Consumers & Use Cases" section is the one most commonly skipped in informal docs, but it's one of the most valuable. Knowing which ETLs or services depend on a table — and why — tells you the blast radius of any schema change before you make it.
+
+```
+Table Information
+  ├── Overview
+  └── Schema
+        | Column Name | Data Type | Nullable | Description |
+
+Notes
+  ├── Key Constraints (Primary Key, Foreign Keys, Unique)
+  └── Table Relationships
+
+Data Flow
+  ├── Data Sources
+  ├── Update Frequency
+  └── Consumers & Use Cases
+```
+
+### For ETLs and automated processes
+
+ETLs have a natural three-part structure: extraction, transformation, loading. Make this explicit before getting into setup and execution details. It orients the reader before they have to parse technical specifics.
+
+The "Typical Runtime" field is one that pays for itself the moment something breaks. If a process normally finishes in 10 minutes and it's been running for two hours, you know something is wrong without needing to read the code.
+
+```
+Process Overview
+  ├── Input / Extraction
+  ├── Transformation / Logic
+  └── Output / Loading
+
+Usage
+  ├── Environment Setup
+  ├── How to Run
+  │     • Entry point and exact command
+  └── Scheduling
+        • Frequency, time, typical runtime
+
+Error Handling & Edge Cases
+  • Known failure modes and what to do
+```
+
+### For tools and manual processes
+
+Manual processes are the most likely to go undocumented because they feel too simple to write up. They usually aren't. The template should force the author to define what problem the tool solves, when to use it, what it needs as input, and what it produces as output — before getting to step-by-step instructions.
+
+```
+Purpose & Use Case
+  ├── Problem Solved
+  ├── When to Use
+  ├── Input / Output
+  └── How It Works (plain language)
+
+Usage
+  ├── Prerequisites
+  ├── Step-by-Step Guide
+  └── CLI Reference (if applicable)
+        | Flag | Description | Example |
+```
+
+### For REST APIs
+
+API docs have the most surface area. The template should cover endpoints, request/response contracts, authentication, and architecture decisions — especially the decisions.
+
+```
+API Overview
+  ├── Base URL, Authentication, Versioning, Rate Limits
+
+Endpoints Summary
+  | Method | Path | Description | Auth Required |
+
+Architecture & Standards
+  ├── Architecture Pattern
+  ├── Key Design Decisions
+  ├── Naming Conventions
+  └── Error Format Standard
+```
+
+The "Key Design Decisions" section is where most API docs fall short. Documenting *that* something is stateless is less useful than documenting *why* it was designed that way. Future maintainers need context, not just facts.
+
+## Writing Standards That Apply Across All Templates
+
+Templates define structure. Writing standards define quality. A few rules that apply regardless of doc type:
+
+**Why, not just how.** Explain the reasoning behind decisions, especially in architecture and transformation logic sections. Facts are cheap — context is what survives long enough to be useful.
+
+**Code blocks for instructions.** For commands, entry points, and setup steps, always use a code block instead of describing it in prose. Prose gets misread. A code block is copy-pasteable.
+
+```bash
+# Clear and unambiguous
+python run_etl.py --env prod --date 2026-04-01
+```
+
+**Flag assumptions explicitly.** If a process depends on a configuration or permission being in place, say so. Never let assumptions hide in plain language: *"This assumes the Windows Scheduler task has already been configured."*
+
+**Deprecation always includes a replacement.** When marking something deprecated, state what replaced it and link to it. A deprecated doc with no replacement reference leaves the reader at a dead end.
+
+**Last Verified Date on every page.** Not a promise of perfection — an honest record of when the doc was last confirmed accurate. A doc verified six months ago might still be correct. A doc with no date could be from any point in history.
+
+## Use N/A, Not Omission
+
+It's tempting to skip template sections that don't apply to a specific doc. Don't. Mark them `N/A` instead.
+
+An omitted section and an inapplicable section look identical to the reader. `N/A` signals that the section was considered — which is a meaningfully different statement. It also prevents future authors from thinking they need to fill something in that was intentionally left empty.
+
+## The Entry Point File
+
+Once you have templates and writing standards, it helps to have a single entry point file that lists available templates and summarizes the standards. This file serves two audiences: new team members learning the system, and any AI assistant you use to help write or update docs.
+
+An effective entry point includes:
+
+- A table mapping doc types to their template files
+- The writing guidelines in brief
+- Status definitions (Active / Deprecated / In Development) used consistently across all doc types
+- How to use the templates — what source material to provide, what to do with unclear sections
+
+If you're using an AI assistant to generate first drafts, providing this file alongside the relevant template and the source material (code, existing docs, context) gives it everything it needs to produce a structurally complete draft. Flag gaps with `[NEEDS REVIEW]` rather than guessing — a complete structure with open questions is more useful than a filled-in doc with invented details.
+
+## The Payoff
+
+The value of a documentation template system isn't any individual doc — it's the aggregate trust it builds. When every doc follows the same structure, readers stop wondering what's missing and start using documentation as a first resort instead of a last one.
+
+It also makes writing easier. Staring at a blank page is harder than filling in a template. Authors can focus on content instead of structure, and reviewers have a consistent baseline to review against.
+
+Start small. Pick the doc type your team produces most inconsistently, write one template, use it for a month, and refine it based on what readers actually need. The system grows from there.
